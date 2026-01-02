@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Galerie photos familiale collaborative">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Photos Famille">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <title>Galerie Photos Famille</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    .install-banner {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(59, 130, 246, 0.3);
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    // Simulation du stockage avec localStorage
+    const storage = {
+      get: async (key, shared) => {
+        const k = shared ? `shared_${key}` : key;
+        const v = localStorage.getItem(k);
+        return v ? { key, value: v, shared } : null;
+      },
+      set: async (key, value, shared) => {
+        const k = shared ? `shared_${key}` : key;
+        localStorage.setItem(k, value);
+        return { key, value, shared };
+      }
+    };
+    window.storage = storage;
+
+    // Application
+    const app = document.getElementById('app');
+    let albums = [];
+    let currentAlbum = null;
+    let selectedPhoto = null;
+    let showNewAlbum = false;
+    let showInstall = false;
+
+    async function loadAlbums() {
+      try {
+        const result = await storage.get('family-albums-shared', true);
+        if (result) albums = JSON.parse(result.value);
+        render();
+      } catch (e) {
+        render();
+      }
+    }
+
+    async function saveAlbums(data) {
+      albums = data;
+      await storage.set('family-albums-shared', JSON.stringify(data), true);
+      render();
+    }
+
+    function createAlbum(name) {
+      if (!name.trim()) return;
+      const newAlbum = {
+        id: Date.now().toString(),
+        name,
+        photos: [],
+        createdAt: new Date().toISOString()
+      };
+      saveAlbums([...albums, newAlbum]);
+      showNewAlbum = false;
+    }
+
+    function deleteAlbum(id) {
+      if (confirm('Supprimer cet album ?')) {
+        saveAlbums(albums.filter(a => a.id !== id));
+      }
+    }
+
+    function uploadPhotos(files, albumId) {
+      Array.from(files).forEach(file => {
+        if (file.size > 5000000) {
+          alert(`${file.name} trop volumineux (max 5MB)`);
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const photo = {
+            id: Date.now().toString() + Math.random(),
+            data: e.target.result,
+            name: file.name,
+            uploadedAt: new Date().toISOString()
+          };
+          const updated = albums.map(a => 
+            a.id === albumId ? {...a, photos: [...a.photos, photo]} : a
+          );
+          saveAlbums(updated);
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function deletePhoto(photoId, albumId) {
+      if (confirm('Supprimer cette photo ?')) {
+        const updated = albums.map(a =>
+          a.id === albumId ? {...a, photos: a.photos.filter(p => p.id !== photoId)} : a
+        );
+        saveAlbums(updated);
+        selectedPhoto = null;
+      }
+    }
+
+    function render() {
+      if (selectedPhoto && currentAlbum) {
+        const idx = currentAlbum.photos.findIndex(p => p.id === selectedPhoto.id);
+        app.innerHTML = `
+          <div class="fixed inset-0 bg-black z-50 flex flex-col">
+            <div class="flex items-center justify-between p-4 bg-slate-900/50">
+              <button onclick="selectedPhoto = null; render()" class="text-white hover:text-blue-400">✕ Fermer</button>
+              <button onclick="deletePhoto('${selectedPhoto.id}', '${currentAlbum.id}')" class="text-red-400 hover:text-red-300">🗑️ Supprimer</button>
+            </div>
+            <div class="flex-1 flex items-center justify-center p-4">
+              <img src="${selectedPhoto.data}" class="max-w-full max-h-full object-contain rounded-lg">
+            </div>
+            <div class="flex items-center justify-center gap-4 p-4 bg-slate-900/50 text-white">
+              <button onclick="if(${idx} > 0) { selectedPhoto = ${JSON.stringify(currentAlbum.photos[idx-1])}; render(); }" ${idx === 0 ? 'disabled class="opacity-30"' : ''} class="px-4 py-2 bg-slate-800 rounded-lg">Précédent</button>
+              <span>${idx + 1} / ${currentAlbum.photos.length}</span>
+              <button onclick="if(${idx} < ${currentAlbum.photos.length - 1}) { selectedPhoto = ${JSON.stringify(currentAlbum.photos[idx+1])}; render(); }" ${idx === currentAlbum.photos.length - 1 ? 'disabled class="opacity-30"' : ''} class="px-4 py-2 bg-slate-800 rounded-lg">Suivant</button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      if (currentAlbum) {
+        app.innerHTML = `
+          <div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+            <div class="max-w-7xl mx-auto p-6">
+              <div class="flex items-center justify-between mb-6">
+                <button onclick="currentAlbum = null; render()" class="text-slate-300 hover:text-white">← Retour</button>
+                <label class="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-white cursor-pointer">
+                  📤 Ajouter
+                  <input type="file" multiple accept="image/*" onchange="uploadPhotos(this.files, '${currentAlbum.id}')" class="hidden">
+                </label>
+              </div>
+              <h1 class="text-3xl font-bold text-white mb-2">${currentAlbum.name}</h1>
+              <p class="text-slate-400 mb-8">${currentAlbum.photos.length} photo(s)</p>
+              ${currentAlbum.photos.length === 0 ? 
+                '<div class="text-center py-20 text-slate-400">Aucune photo</div>' :
+                `<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  ${currentAlbum.photos.map(p => `
+                    <div onclick="selectedPhoto = ${JSON.stringify(p).replace(/"/g, '&quot;')}; render()" class="aspect-square bg-slate-800 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-500">
+                      <img src="${p.data}" class="w-full h-full object-cover">
+                    </div>
+                  `).join('')}
+                </div>`
+              }
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      app.innerHTML = `
+        <div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <div class="max-w-7xl mx-auto p-6">
+            <div class="flex items-center justify-between mb-8">
+              <div>
+                <h1 class="text-4xl font-bold text-white mb-2">Albums Famille</h1>
+                <p class="text-slate-400">☁️ Synchronisés en temps réel</p>
+              </div>
+              <button onclick="showNewAlbum = true; render()" class="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-white">+ Nouvel album</button>
+            </div>
+
+            ${showNewAlbum ? `
+              <div class="mb-8 p-6 bg-slate-800/50 rounded-lg border border-slate-700">
+                <h3 class="text-xl text-white mb-4">Nouvel album</h3>
+                <div class="flex gap-3">
+                  <input id="albumName" type="text" placeholder="Nom de l'album" class="flex-1 px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white">
+                  <button onclick="createAlbum(document.getElementById('albumName').value)" class="px-6 py-3 bg-blue-600 rounded-lg text-white">Créer</button>
+                  <button onclick="showNewAlbum = false; render()" class="px-6 py-3 bg-slate-700 rounded-lg text-slate-300">Annuler</button>
+                </div>
+              </div>
+            ` : ''}
+
+            ${albums.length === 0 ? 
+              '<div class="text-center py-20 text-slate-400 text-xl">Aucun album</div>' :
+              `<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                ${albums.map(a => `
+                  <div class="bg-slate-800/50 rounded-lg border border-slate-700 hover:border-blue-500 overflow-hidden cursor-pointer" onclick="currentAlbum = ${JSON.stringify(a).replace(/"/g, '&quot;')}; render()">
+                    <div class="aspect-video bg-slate-900 flex items-center justify-center text-slate-700">
+                      ${a.photos.length > 0 ? `<img src="${a.photos[0].data}" class="w-full h-full object-cover">` : '📷'}
+                    </div>
+                    <div class="p-4">
+                      <h3 class="text-xl font-bold text-white">${a.name}</h3>
+                      <p class="text-slate-400 text-sm">${a.photos.length} photo(s)</p>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>`
+            }
+          </div>
+
+          ${!localStorage.getItem('hasSeenInstall') ? `
+            <div class="install-banner">
+              <div class="flex items-start gap-3">
+                <span class="text-2xl">📱</span>
+                <div class="flex-1">
+                  <h3 class="font-bold mb-1">Installer l'application</h3>
+                  <p class="text-sm mb-2">Ajoutez à votre écran d'accueil !</p>
+                  <p class="text-xs">iPhone: Partager → "Sur l'écran d'accueil"<br>Android: Menu → "Installer"</p>
+                </div>
+                <button onclick="localStorage.setItem('hasSeenInstall', 'true'); render()" class="text-2xl">✕</button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // Auto-refresh toutes les 3 secondes
+    setInterval(loadAlbums, 3000);
+    
+    // Enregistrer le Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+
+    // Démarrage
+    loadAlbums();
+
+    // Rendre les fonctions globales
+    window.createAlbum = createAlbum;
+    window.deleteAlbum = deleteAlbum;
+    window.uploadPhotos = uploadPhotos;
+    window.deletePhoto = deletePhoto;
+  </script>
+</body>
+</html>
